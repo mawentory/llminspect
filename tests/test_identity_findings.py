@@ -17,6 +17,7 @@ def test_report_is_html_with_appended_sections() -> None:
     assert "2026-09-16 00:20Z" in html
     assert "2026-09-16 01:10Z" in html
     assert "2026-09-16 01:25Z" in html
+    assert "2026-09-16 02:05Z" in html
 
 
 def test_report_covers_required_identity_topics() -> None:
@@ -42,6 +43,10 @@ def test_report_covers_required_identity_topics() -> None:
         "GLM",
         "false-positive",
         "uncertain",
+        "misconfigured",
+        "anthropic-version",
+        "Messages",
+        "think-mode",
     ]
     missing = [item for item in required if item not in html]
     assert missing == [], f"report missing required coverage: {missing}"
@@ -53,3 +58,12 @@ def test_kvv_is_identity_template_not_capability_substitute() -> None:
     assert "not a unique ID" in html or "not instead of it" in html
     assert "OCRBench" in html
     assert "Fireworks" in html
+
+
+def test_report_accounts_for_misconfig_and_anthropic_stack_artifacts() -> None:
+    html = _html()
+    assert "Misconfiguration underperformance" in html
+    assert "Visible Anthropic JSON/headers" in html
+    assert "stack DNA" in html
+    assert "chat_template_kwargs" in html
+    assert "ant-rl" in html or "anthropic-ratelimit" in html

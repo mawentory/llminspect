@@ -33,6 +33,7 @@
     <li><strong>2026-09-16 01:10Z</strong> — cloned primary repos under <code>/tmp</code>; extracted Kimi Vendor Verifier identity-contract pattern; tokenizer differential; one-token JSD paper; TokenPrint white-box contrast; DeepSeek/GLM official analog search.</li>
     <li><strong>2026-09-16 01:25Z</strong> — user direction: treat Kimi Vendor Verifier as the process reference for true identity (official contract vs vendor), not merely a capability leaderboard.</li>
     <li><strong>2026-09-16 01:40Z</strong> — published tracer-bullet GitHub issues #1–#7 on mawentory/whichllm via /to-tickets subagents (identity contract, zoo ranker, feature preflight, JSD uncertain band, reasoning/system-prompt FPs, same-vocab vs KVV benches, enrollment drift).</li>
+    <li><strong>2026-09-16 02:05Z</strong> — account for misconfiguration underperformance (not a swap) and visible Anthropic-style JSON/headers as stack DNA false positives.</li>
   </ol>
 
   <h2 id="taxonomy">Signal taxonomy (do not overlap scanners)</h2>
@@ -58,13 +59,13 @@
         <td>Serving-stack DNA</td>
         <td>Error prose/codes, <code>finish_reason</code>, headers, template offset</td>
         <td>Wrapper vs lab serving stack</td>
-        <td>Router answers some probes itself; matching stack ≠ matching weights</td>
+        <td>Router answers some probes itself; matching stack ≠ matching weights; visible Anthropic JSON/headers prove a gateway, not Claude weights</td>
       </tr>
       <tr>
         <td>Capability / vendor-verify</td>
         <td>OCR/MMMU/coding/tool evals, prompt_tokens contract</td>
         <td>Size class or infra fidelity vs a vendor’s published bar</td>
-        <td>Treating “passes Kimi Vendor Verifier” as “this is Kimi K3”</td>
+        <td>Treating “passes Kimi Vendor Verifier” as “this is Kimi K3”; treating OCR/DeepSWE collapse as a swap when the chat template / think-mode is wrong</td>
       </tr>
     </tbody>
   </table>
@@ -149,6 +150,8 @@
       <tr><td>Licensed vocab</td><td>GLM tokenizer on stealth</td><td>Third-party serving GLM</td><td>Lineage ≠ operator (iSimplifyMe caveat)</td></tr>
       <tr><td>Router-answered errors</td><td>Matching error prose</td><td>OpenRouter’s own validator</td><td>modelprint labels router-reported</td></tr>
       <tr><td>Personality probes</td><td>Self-ID / safety</td><td>Patched in an afternoon</td><td>Out of protocol</td></tr>
+      <tr><td>Misconfiguration underperformance</td><td>OCR/DeepSWE/coding far below official</td><td>Wrong chat template, think-mode (<code>kimi</code> vs <code>opensource</code>), tool parser, reasoning effort, max_tokens, or system wrapper — same weights</td><td>If tokenizer+JSD match, label <code>misconfigured</code>, not swap. Replay official serve flags before fraud.</td></tr>
+      <tr><td>Visible Anthropic JSON/headers</td><td><code>anthropic-version</code>, <code>anthropic-ratelimit-*</code>, <code>msg_</code> ids, Messages body <code>content:[{type:text}]</code>, or the model echoing that JSON in the completion</td><td>LiteLLM/OpenRouter/proxy translating OpenAI↔Anthropic; CORS-visible header families (modelprint <code>net-headerdna</code> <code>ant-rl</code>)</td><td>Treat as stack DNA only. Never “headers look Anthropic ⇒ Claude”. Strip leaked request JSON from completions before JSD.</td></tr>
     </tbody>
   </table>
 
@@ -164,10 +167,20 @@
     <li>Audit vendor: prompt_tokens vs goldens (fail closed on undercount / &gt;+3); abort if counts unstable across repeats.</li>
     <li>JSD vs today’s official fingerprint with match/uncertain/mismatch/insufficient; split-half self-check.</li>
     <li>If tokenizer matches but JSD uncertain: capability/context class (size), never personality.</li>
-    <li>Stack DNA (errors/headers) only to name the wrapper, not the weights.</li>
+    <li>If tokenizer+JSD match and capability collapses: <strong>misconfiguration</strong> until official serve flags (template, think-mode, tool parser, effort) have been replayed. Do not call that a swap.</li>
+    <li>Stack DNA (errors/headers, Anthropic Messages JSON, <code>msg_</code> vs <code>chatcmpl-</code>) only to name the wrapper, not the weights. Strip leaked protocol JSON from completions before behavioral compare.</li>
     <li>Re-enroll on a timer. Two mismatch days beat one.</li>
   </ol>
   <p>Unlimited budget is spent on more cells, more goldens (CJK/code/emoji/vision), and cadence — not on a second tokenizer scanner or LLMmap plus Tosea plus LLM-Fingerprinter.</p>
+
+  <h2 id="misconfig-headers">Misconfiguration vs visible Anthropic JSON/headers</h2>
+  <p>Two extra false-positive modes that look like “wrong model” in the wild and are not.</p>
+  <h3>Misconfiguration underperformance</h3>
+  <p>KVV already splits official vs open-source <em>wiring</em>: <code>--think-mode kimi</code> sends <code>{"thinking":{"type":"enabled"}}</code>; <code>--think-mode opensource</code> sends <code>chat_template_kwargs</code>. Apply the official extra_body to a vLLM/SGLang lane and thinking stays off; OCRBench/DeepSWE collapse. Same for GLM <code>--tool-call-parser glm47</code> / <code>--reasoning-parser glm45</code>, Qwen vs Llama chat templates, truncated <code>max_tokens</code>, and effort <code>low</code> vs <code>max</code>.</p>
+  <p>Capability drop with a <strong>matching tokenizer contract and matching one-token JSD</strong> is the misconfig signature. A swap usually breaks tokenizer and/or JSD first. Protocol outcome: <code>misconfigured</code>, not <code>mismatch</code>, until the official serve recipe has been replayed.</p>
+  <h3>Visible Anthropic JSON/headers</h3>
+  <p>modelprint <code>net-headerdna</code> records <code>anthropic-ratelimit-requests-limit</code> as <code>ant-rl</code>, plus id prefixes (<code>msg_</code> vs <code>chatcmpl-</code> / <code>gen-</code>). Those families identify <strong>Cloudflare / Bedrock / Anthropic Messages / OpenAI-compat gateways</strong>. A Claude served through OpenAI-compat often still leaks Messages JSON (<code>type: message</code>, <code>content: [{type: text}]</code>, <code>stop_reason</code>) or the model echoes that envelope in the completion because the wrapper stuffed it into the prompt.</p>
+  <p>False positives both ways: “Anthropic headers ⇒ this is Claude” when the gateway is only translating; “JSON in the answer ⇒ different model” when the weights are real and the wrapper is dirty. Strip protocol envelopes before JSD. Keep header/id-prefix rows in stack DNA, never in the model-identity verdict.</p>
 
   <h2 id="tickets">Tickets published (to-tickets subagents)</h2>
   <p>Tracker: <a href="https://github.com/mawentory/whichllm/issues">mawentory/whichllm issues</a>. Shape: what to build, acceptance criteria, blocked-by. Labels include <code>ready-for-agent</code>.</p>
@@ -181,6 +194,8 @@
       <tr><td><a href="https://github.com/mawentory/whichllm/issues/2">#2</a></td><td>Pin system prompt and disable reasoning or flag post-reasoning</td><td>false-positive accounting</td><td>#1</td></tr>
       <tr><td><a href="https://github.com/mawentory/whichllm/issues/3">#3</a></td><td>Same-vocab checkpoint disambiguation without treating KVV benches as identity</td><td>false-positive / capability split</td><td>#1</td></tr>
       <tr><td><a href="https://github.com/mawentory/whichllm/issues/4">#4</a></td><td>Reference enrollment drift and two-day confirmation</td><td>false-positive / EER</td><td>#1</td></tr>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/8">#8</a></td><td>Misconfiguration underperformance is not a model swap</td><td>false-positive / capability</td><td>#1, #5</td></tr>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/9">#9</a></td><td>Visible Anthropic JSON/headers are stack DNA not Claude identity</td><td>false-positive / stack DNA</td><td>#1</td></tr>
     </tbody>
   </table>
 </body>
