@@ -32,6 +32,7 @@
     <li><strong>2026-09-16 00:20Z</strong> — seeded report skeleton, signal taxonomy, and non-goals (personality/censorship probes out of identity evidence).</li>
     <li><strong>2026-09-16 01:10Z</strong> — cloned primary repos under <code>/tmp</code>; extracted Kimi Vendor Verifier identity-contract pattern; tokenizer differential; one-token JSD paper; TokenPrint white-box contrast; DeepSeek/GLM official analog search.</li>
     <li><strong>2026-09-16 01:25Z</strong> — user direction: treat Kimi Vendor Verifier as the process reference for true identity (official contract vs vendor), not merely a capability leaderboard.</li>
+    <li><strong>2026-09-16 01:40Z</strong> — published tracer-bullet GitHub issues #1–#7 on mawentory/whichllm via /to-tickets subagents (identity contract, zoo ranker, feature preflight, JSD uncertain band, reasoning/system-prompt FPs, same-vocab vs KVV benches, enrollment drift).</li>
   </ol>
 
   <h2 id="taxonomy">Signal taxonomy (do not overlap scanners)</h2>
@@ -167,6 +168,21 @@
     <li>Re-enroll on a timer. Two mismatch days beat one.</li>
   </ol>
   <p>Unlimited budget is spent on more cells, more goldens (CJK/code/emoji/vision), and cadence — not on a second tokenizer scanner or LLMmap plus Tosea plus LLM-Fingerprinter.</p>
+
+  <h2 id="tickets">Tickets published (to-tickets subagents)</h2>
+  <p>Tracker: <a href="https://github.com/mawentory/whichllm/issues">mawentory/whichllm issues</a>. Shape: what to build, acceptance criteria, blocked-by. Labels include <code>ready-for-agent</code>.</p>
+  <table>
+    <thead><tr><th>#</th><th>Title</th><th>Signal</th><th>Blocked by</th></tr></thead>
+    <tbody>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/5">#5</a></td><td>Official prompt_tokens identity contract (Kimi Vendor Verifier shape)</td><td>KVV identity contract</td><td>none</td></tr>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/6">#6</a></td><td>One tokenizer zoo ranker for unknown/stealth claims</td><td>tokenizer differential</td><td>#5</td></tr>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/7">#7</a></td><td>Family feature-contract preflight</td><td>stack/API DNA</td><td>#5</td></tr>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/1">#1</a></td><td>One-token JSD verify with match/uncertain/mismatch/insufficient</td><td>behavioral identity + EER band</td><td>#5</td></tr>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/2">#2</a></td><td>Pin system prompt and disable reasoning or flag post-reasoning</td><td>false-positive accounting</td><td>#1</td></tr>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/3">#3</a></td><td>Same-vocab checkpoint disambiguation without treating KVV benches as identity</td><td>false-positive / capability split</td><td>#1</td></tr>
+      <tr><td><a href="https://github.com/mawentory/whichllm/issues/4">#4</a></td><td>Reference enrollment drift and two-day confirmation</td><td>false-positive / EER</td><td>#1</td></tr>
+    </tbody>
+  </table>
 </body>
 </html>
 
