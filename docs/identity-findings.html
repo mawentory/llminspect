@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>whichllm identity-benchmark findings</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; line-height: 1.5; max-width: 52rem; margin: 2rem auto; padding: 0 1.25rem; }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.2rem; border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent); padding-top: 1.25rem; margin-top: 2rem; }
+    h3 { font-size: 1.05rem; }
+    .meta { color: color-mix(in srgb, currentColor 65%, transparent); font-size: 0.92rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+    th, td { border: 1px solid color-mix(in srgb, currentColor 22%, transparent); padding: 0.4rem 0.55rem; text-align: left; vertical-align: top; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+    pre { overflow: auto; padding: 0.75rem; background: color-mix(in srgb, currentColor 6%, transparent); }
+    .log { font-size: 0.9rem; }
+    .gap { background: color-mix(in srgb, #c45c00 12%, transparent); }
+    .warn { background: color-mix(in srgb, #b00020 10%, transparent); }
+    a { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>whichllm identity-benchmark findings</h1>
+  <p class="meta">Living report. New sections are appended as primary sources are read. Goal: a closed-set identity protocol that names the served model and accounts for false positives. Unlimited tokens/requests is assumed for the recommended protocol, not spent in this research pass.</p>
+  <p class="meta">Repo: <a href="https://github.com/mawentory/whichllm">mawentory/whichllm</a>. Work product of a research goal; scanners are not implemented here.</p>
+
+  <h2 id="append-log">Append log</h2>
+  <ol class="log">
+    <li><strong>2026-09-16 00:20Z</strong> — seeded report skeleton, signal taxonomy, and non-goals (personality/censorship probes out of identity evidence).</li>
+    <li><strong>2026-09-16 01:10Z</strong> — cloned primary repos under <code>/tmp</code>; extracted Kimi Vendor Verifier identity-contract pattern; tokenizer differential; one-token JSD paper; TokenPrint white-box contrast; DeepSeek/GLM official analog search.</li>
+    <li><strong>2026-09-16 01:25Z</strong> — user direction: treat Kimi Vendor Verifier as the process reference for true identity (official contract vs vendor), not merely a capability leaderboard.</li>
+  </ol>
+
+  <h2 id="taxonomy">Signal taxonomy (do not overlap scanners)</h2>
+  <p>Prior conversation collapsed several GitHub projects into <em>the same measurements</em>. The identity benchmark uses <strong>one implementation per independent signal</strong>.</p>
+  <table>
+    <thead>
+      <tr><th>Signal</th><th>What is observed</th><th>What a match proves</th><th>False-positive trap</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Tokenizer differential</td>
+        <td><code>usage.prompt_tokens</code> on pinned strings minus a baseline</td>
+        <td>Vocabulary / lab family</td>
+        <td>Same-vocab checkpoints (GLM-5.2 vs 5.3; Qwen3.8-27B vs Max) look identical</td>
+      </tr>
+      <tr>
+        <td>One-token behavioral identity</td>
+        <td>Answer distributions to trivial one-word tasks; Jensen–Shannon vs a trusted reference</td>
+        <td>Checkpoint-ish serving identity vs that reference</td>
+        <td>System prompt, reasoning-on, provider mix, quantization, backend rotation</td>
+      </tr>
+      <tr>
+        <td>Serving-stack DNA</td>
+        <td>Error prose/codes, <code>finish_reason</code>, headers, template offset</td>
+        <td>Wrapper vs lab serving stack</td>
+        <td>Router answers some probes itself; matching stack ≠ matching weights</td>
+      </tr>
+      <tr>
+        <td>Capability / vendor-verify</td>
+        <td>OCR/MMMU/coding/tool evals, prompt_tokens contract</td>
+        <td>Size class or infra fidelity vs a vendor’s published bar</td>
+        <td>Treating “passes Kimi Vendor Verifier” as “this is Kimi K3”</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Personality, self-identification, and censorship probes are <strong>not</strong> identity evidence. They are the first thing a dishonest provider patches and they already produced opposite verdicts on the same stealth model (modelprint README).</p>
+
+  <h2 id="kvv-identity">Kimi Vendor Verifier as the identity-check template</h2>
+  <p>Primary source: local clone <code>/tmp/Kimi-Vendor-Verifier</code> at <code>3dad65a</code>, README plus <code>tests/prompt_tokens/test_prompt_tokens.py</code>, <code>tests/k3_features/test_tokenization_groundtruth.py</code>, <code>tests/params/test_params.py</code>, <code>testdata/prompt_token_cases/README.md</code>. Upstream: <a href="https://github.com/MoonshotAI/Kimi-Vendor-Verifier">MoonshotAI/Kimi-Vendor-Verifier</a>.</p>
+  <p>This is the best <em>process</em> we found for “is this vendor actually serving the claimed model?” It does not work by asking the model who it is. It works by comparing a suspect endpoint to a <strong>first-party identity contract</strong>:</p>
+  <ol>
+    <li><strong>Official tokenizer + chat template as oracle.</strong> Prompt-token cases store <code>expected_prompt_tokens</code> “confirmed against the reference tokenizer; do not guess them.” K3 cases are derived from Moonshot’s internal <code>tokenism</code> golden (<code>totalTokens - len(pendingTokenIds)</code>).</li>
+    <li><strong>Vendor must report the same <code>usage.prompt_tokens</code>.</strong> <code>tests/prompt_tokens/</code> streams each case and reads stream usage. Accept band is <code>[expected, expected+3]</code> (<code>MAX_PROMPT_TOKEN_OVERCOUNT = 3</code>). Under-count fails; over-count of 4+ fails. This is tokenizer + template identity against the official meter, which is also the billing meter.</li>
+    <li><strong>Byte-exact groundtruth payload.</strong> <code>test_tokenization_groundtruth.py</code> sends a raw JSON string (not re-serialized) whose expected count (539) comes from a local tokenism instance. Comment in source: “the one place where tokenism correctness (not just two-path consistency) is checked.” Currently marked <code>@pytest.mark.skip("skip, not pass")</code> — even Moonshot’s own extra oracle is allowed to lag.</li>
+    <li><strong>Feature contract unique to the claimed checkpoint.</strong> <code>tests/k3_features/</code> (dynamic tools, <code>response_format</code>, <code>tool_choice</code>, thinking effort) and <code>tests/params/</code> (immutable <code>temperature</code>/<code>top_p</code>/<code>n</code> defaults and rejections). A cheaper substitute often cannot implement K3’s API surface.</li>
+    <li><strong>Then</strong> capability benches (OCRBench, MMMU, BEAM, DeepSWE) scored against the official row (Moonshot 0.89 / 0.82 / 0.31 / 0.675 at thinking=max). Pre-flight must pass first.</li>
+  </ol>
+  <p>Also record aggregator vs upstream usage: KVV insists on stream-reported <code>usage.prompt_tokens</code> from the vendor path, not an aggregator estimate.</p>
+  <p>Identity implication for whichllm: copy this <em>shape</em> for every claimed model family. Enrollment = official tokenizer + template + feature contract + official-API behavioral reference. Audit = vendor must match those constants. Capability scores are a serving-fidelity bar, not a unique ID: Fireworks/Together already sit within a few points of Moonshot on OCRBench without that proving they could not be a slightly different K3 build.</p>
+  <p class="warn"><strong>False-positive modes inside KVV itself.</strong> The +3 prompt-token overcount can hide a nearby template. OCR/DeepSWE proximity can match a different strong coding model. The skipped 539-token oracle means one independent tokenism check is not currently gating CI. Vision cases depend on exact image bytes/dimensions. Stream usage location is Kimi-specific (<code>choices[].usage</code> or top-level).</p>
+
+  <h2 id="tokenizer-clones">Tokenizer differential (cloned sources)</h2>
+  <p>Local clones: <code>/tmp/tokenizer-fingerprint</code> HEAD <code>310c1aa</code>; <code>/tmp/modelprint</code> HEAD <code>6c27374</code>. White paper: <a href="https://isimplifyme.com/whitepapers/the-tokenizer-is-a-fingerprint">The Tokenizer Is a Fingerprint</a>.</p>
+  <p>Method (README, one paragraph): hidden chat template adds constant overhead; <code>prompt_tokens(BASE+probe) − prompt_tokens(BASE)</code> is the model’s count for the probe; rank against local Hugging Face <code>tokenizer.json</code> files over 95 strings chosen to separate vocabs (scripts, code, Unicode).</p>
+  <p><code>tokenizers/fetch.sh</code> candidates: GLM-4.5, GLM-5.2, glm-4-9b, Qwen3-235B, Qwen2.5-72B, MiMo, DeepSeek-V3.1, Seed-OSS, Yi-1.5, Hunyuan, ERNIE-4.5, MiniMax-M1, Llama-3.1, gpt-oss-120b, Kimi-K2 tiktoken. MiMo is byte-identical to Qwen2.5. <strong>GLM-5.3 and Qwen3.8 are not in the zoo</strong> even though HF ships <code>tokenizer.json</code> for both.</p>
+  <p>modelprint’s four tok-* probes (English, Chinese, code, emoji) plus template-offset are the <strong>same signal</strong> with a one-character baseline and a duplicate-run <code>unstable</code> flag when a router splits hosts. Do not ship both as separate products. Keep: (a) KVV-style official expected constants when the claimed model has a first-party tokenizer; (b) zoo ranking when the claim is unknown/stealth.</p>
+  <p>Caveats from tokenizer-fingerprint README: vocabulary ≠ operator; specials may be escaped; point-in-time; defeating the fingerprint requires corrupting billing <code>usage</code>.</p>
+
+  <h2 id="one-token">One-token behavioral identity (arXiv:2607.10252)</h2>
+  <p>Primary: <a href="https://arxiv.org/html/2607.10252v1">Bruckner, “One Token Is Enough”</a>. Implementation clone: <code>/tmp/llm-fingerprint-detector</code> HEAD <code>94dc446</code>, <code>src/verdict.ts</code>, <code>src/constants.ts</code>.</p>
+  <ul>
+    <li>Battery: 10 tasks × 4 languages (en/ru/zh/ar) = 40 cells; T=1.0; max_tokens=16; reasoning disabled; n≈30 (15 for expensive models).</li>
+    <li>Distance: mean JSD (base 2) over cells with ≥10 valid samples each side.</li>
+    <li>Baselines (paper + Tosea constants): same-model split-half ≈ 0.14; same model other provider median 0.227; different-model median 0.463.</li>
+    <li>Verification EER: 7.3% full 40-cell battery; 10.6% with 8 cells. Tosea verdicts: match ≤0.25, uncertain ≤0.35, else mismatch; insufficient if &lt;4 comparable cells. Split-half warn at 0.25 (backend rotation).</li>
+    <li>Cross-provider AUC 0.880 vs 0.971 same-mix — serving stack moves the signal.</li>
+    <li>Anomaly: <code>writer/palmyra-x5</code> JSD 0.141 from Qwen3-235B, at the genuine same-model median 0.140.</li>
+    <li>10 of 34 same-model provider pairs diverged past the 5th percentile of impostors (e.g. Llama-3.2-3B Cloudflare vs Parasail 0.716).</li>
+    <li>Mandatory / hidden reasoning excluded: post-reasoning is a different generative process. 0.76% of census responses still carried a reasoning trace despite disable.</li>
+    <li>System prompt is load-bearing (Tosea README: swapping only the system prompt shifts JSD ≈ 0.44–0.46, impostor magnitude).</li>
+    <li>Gao et al. cited: 11/31 Llama commercial endpoints incompatible with vendor reference weights.</li>
+  </ul>
+  <p>whichllm must never emit a binary “this is model X” from one JSD. The identity benchmark’s default is <strong>match / uncertain / mismatch / insufficient</strong>, with EER published on the protocol.</p>
+
+  <h2 id="tokenprint">TokenPrint (arXiv:2608.08139) — white-box contrast</h2>
+  <p><a href="https://arxiv.org/html/2608.08139v1">Wu, Zhao, Chen</a>: top-k vocabulary projections of late hidden states on 250 probes; Jaccard of decoded strings. Requires forward passes / logits, not a chat API. Useful warnings for black-box identity:</p>
+  <ul>
+    <li>Output-space similarity does <em>not</em> reliably name the exact parent: R1 distillations retrieve documented base in top-2 but first in only 1/5; Instruct siblings outrank bases.</li>
+    <li>Identical-data models with no shared weights score 0.48 raw — shared corpora look like family.</li>
+    <li>int4 Jaccard 0.82–0.85 vs max cross-model 0.81: aggressive quantization can sit on the identity boundary.</li>
+    <li>Authors refuse standalone proof of training history. Same humility belongs in whichllm tickets.</li>
+  </ul>
+
+  <h2 id="overlap-clones">Overlap among cloned fingerprint tools</h2>
+  <table>
+    <thead><tr><th>Clone</th><th>HEAD</th><th>Actual signal</th><th>Keep?</th></tr></thead>
+    <tbody>
+      <tr><td>tokenizer-fingerprint</td><td>310c1aa</td><td>prompt_tokens differential vs HF zoo</td><td>Yes — zoo ranking for unknown claims</td></tr>
+      <tr><td>modelprint tok-*</td><td>6c27374</td><td>same prompt_tokens, 4 strings + unstable</td><td>Steal unstable/baseline; do not duplicate scanner</td></tr>
+      <tr><td>Kimi-Vendor-Verifier prompt_tokens</td><td>3dad65a</td><td>prompt_tokens vs official constants</td><td>Yes — primary identity contract when claim is named</td></tr>
+      <tr><td>llm-fingerprint-detector</td><td>94dc446</td><td>one-token JSD</td><td>Yes — one behavioral implementation</td></tr>
+      <tr><td>LLMmap (<a href="https://arxiv.org/html/2407.15847v4">arXiv:2407.15847</a>)</td><td>cloned</td><td>8 engineered queries, classifier of versions</td><td>No as primary — magic strings, T2 filterable (Bruckner VII-B)</td></tr>
+      <tr><td>LLM-Fingerprinter</td><td>cloned</td><td>31 personality/safety/style prompts</td><td>No — modelprint already saw opposite verdicts on Ox Alpha</td></tr>
+      <tr><td>S1M0N38/llm-fingerprint, Mai8304/model-fingerprint, LLM-API-Verifier</td><td>cloned</td><td>more behavioral / plugin wrappers</td><td>No extra scanner; wrappers only</td></tr>
+      <tr><td>KVV OCR/MMMU/DeepSWE</td><td>3dad65a</td><td>capability vs official bar</td><td>Size/serving fidelity after identity contract, not instead of it</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="false-positives">False-positive catalog the identity benchmark must account for</h2>
+  <table>
+    <thead><tr><th>Mode</th><th>What looks like a match</th><th>What it actually is</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>same-vocab different checkpoint</td><td>Tokenizer 95/95</td><td>GLM-5.2 vs 5.3 (same base); Qwen3.8-27B vs Max</td><td>JSD + capability class; never tokenizer-only “exact model”</td></tr>
+      <tr><td>Same weights, other provider</td><td>JSD ~0.227</td><td>Serving-stack noise</td><td>Cross-provider band; do not call 0.23 a mismatch</td></tr>
+      <tr><td>System prompt injection</td><td>JSD ~0.44</td><td>Wrapper, not swap</td><td>Pin identical minimal system prompt both sides</td></tr>
+      <tr><td>multi-host routing</td><td>Noisy token counts / high split-half JSD</td><td>Aggregator rotation</td><td>modelprint <code>unstable</code>; Tosea split-half warn 0.25; pin host</td></tr>
+      <tr><td>Quantization</td><td>Near-boundary Jaccard/JSD</td><td>int4 of the real model</td><td>Uncertain band; optional logprob geometry</td></tr>
+      <tr><td>Reasoning-on</td><td>Wrong fingerprint channel</td><td>Post-reasoning sample</td><td>Disable reasoning or flag postReasoning / exclude</td></tr>
+      <tr><td>Aggregator usage</td><td>Wrong prompt_tokens</td><td>Router estimate</td><td>KVV: demand stream usage; iSimplifyMe: cache granularity as upstream evidence</td></tr>
+      <tr><td>EER / single run</td><td>One mismatch</td><td>7–11% equal error</td><td>Uncertain verdict; two independent days</td></tr>
+      <tr><td>Reference drift</td><td>Mismatch vs stale official</td><td>Vendor updated weights</td><td>Re-enroll official fingerprint dated</td></tr>
+      <tr><td>Shared training data</td><td>High TokenPrint similarity</td><td>Independent models on same corpus</td><td>Do not claim operator from output overlap</td></tr>
+      <tr><td>Capability coincidence</td><td>OCRBench ≈ official</td><td>Another strong model</td><td>KVV preflight tokenizer/features first</td></tr>
+      <tr><td>Licensed vocab</td><td>GLM tokenizer on stealth</td><td>Third-party serving GLM</td><td>Lineage ≠ operator (iSimplifyMe caveat)</td></tr>
+      <tr><td>Router-answered errors</td><td>Matching error prose</td><td>OpenRouter’s own validator</td><td>modelprint labels router-reported</td></tr>
+      <tr><td>Personality probes</td><td>Self-ID / safety</td><td>Patched in an afternoon</td><td>Out of protocol</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="vendor-analogs">Kimi K3 vendor benchmark vs DeepSeek and GLM analogs</h2>
+  <p><strong>Kimi (official):</strong> <a href="https://github.com/MoonshotAI/Kimi-Vendor-Verifier">MoonshotAI/Kimi-Vendor-Verifier</a> is the first-party vendor-verifier. K3 table compares Moonshot, Fireworks, Baseten, Together, DigitalOcean, Inferact vLLM, Nebius, Modal on OCRBench / MMMU Pro Vision / BEAM(1M) / DeepSWE. Identity-relevant pieces are the pytest contracts (<code>prompt_tokens</code>, params, k3_features, tool schemas), not the leaderboard alone.</p>
+  <p class="gap"><strong>DeepSeek — no official analog found.</strong> Searched GitHub orgs/products: <code>deepseek-ai</code> vendor/verifier/fingerprint repos via <code>gh search repos --owner=deepseek-ai</code> (empty); web search for official vendor-verifier / prompt_tokens contract. What exists is third-party: <a href="https://github.com/karminski/LLM-Vendor-Verfier">karminski/LLM-Vendor-Verfier</a> (cloned <code>/tmp/LLM-Vendor-Verfier</code>) compares tool-call similarity of resellers to <code>deepseek-official</code> (description: “Verify whether the LLM vendor has used quantitative models”). Also <a href="https://github.com/FLock-io/Vendor-Verifier">FLock-io/Vendor-Verifier</a> (generic tool-call vs baseline). Neither is a DeepSeek-published identity contract with tokenizer goldens. DeepSeek publishes model cards and API docs, not a KVV-style vendor battery.</p>
+  <p class="gap"><strong>GLM / Z.ai — no official analog found.</strong> Searched <code>zai-org</code>, <code>THUDM</code>, docs.z.ai / Hugging Face cookbooks. Hits are training reward “verifiers” (<code>zai-org/GLM-V</code> <code>glmv_reward</code> math/OCR judges) and vLLM serve flags (<code>--tool-call-parser glm47</code>), plus Z.ai Code Bench as an in-house <em>capability</em> eval on the GLM-5.3 blog — not a third-party serving-identity harness with prompt_token goldens. GLM-5.3 uses the GLM-5.2 base (post-training only), so tokenizer identity cannot separate 5.2 from 5.3.</p>
+  <p>whichllm should therefore: (1) adopt KVV’s contract shape as the identity reference implementation; (2) for DeepSeek/GLM, <em>construct</em> first-party-derived cases from published <code>tokenizer.json</code> + official API enrollment, and cite the official-gap rather than pretend a vendor-verifier repo exists.</p>
+
+  <h2 id="protocol">Recommended identity protocol (unlimited tokens, one implementation per signal)</h2>
+  <ol>
+    <li>Enroll official API: tokenizer goldens (KVV cases), feature contract, 40-cell one-token fingerprint, dated.</li>
+    <li>Audit vendor: prompt_tokens vs goldens (fail closed on undercount / &gt;+3); abort if counts unstable across repeats.</li>
+    <li>JSD vs today’s official fingerprint with match/uncertain/mismatch/insufficient; split-half self-check.</li>
+    <li>If tokenizer matches but JSD uncertain: capability/context class (size), never personality.</li>
+    <li>Stack DNA (errors/headers) only to name the wrapper, not the weights.</li>
+    <li>Re-enroll on a timer. Two mismatch days beat one.</li>
+  </ol>
+  <p>Unlimited budget is spent on more cells, more goldens (CJK/code/emoji/vision), and cadence — not on a second tokenizer scanner or LLMmap plus Tosea plus LLM-Fingerprinter.</p>
+</body>
+</html>
+
