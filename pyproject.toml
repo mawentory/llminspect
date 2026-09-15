@@ -1,0 +1,40 @@
+[project]
+name = "whichllm"
+version = "0.1.0"
+description = "Identify which LLM an OpenAI-compatible API is actually serving."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "mawentory" }]
+keywords = ["llm", "tokenizer", "fingerprint", "verification"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "httpx>=0.27",
+  "tokenizers>=0.21",
+]
+
+[project.optional-dependencies]
+tiktoken = ["tiktoken>=0.8"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+whichllm = "whichllm.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/whichllm"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
