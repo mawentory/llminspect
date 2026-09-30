@@ -1,4 +1,4 @@
-# whichllm
+# llminspector
 
 Identify **which LLM** an OpenAI-compatible API is actually serving when the
 provider name cannot be trusted.
@@ -41,11 +41,26 @@ Prior art we are **not** vendoring wholesale:
 - [modelprint](https://github.com/unclecode/modelprint) — plumbing probes
 - [llm-fingerprint-detector](https://github.com/ToseaAI/llm-fingerprint-detector) — one-token JSD ([arXiv:2607.10252](https://arxiv.org/abs/2607.10252))
 
+## Middle-context drop
+
+`llminspector middle-drop` repeats one chat-completions body against an
+OpenAI-compatible endpoint and checks whether the middle of the prompt
+survived. The body is identical on every call. A DROP means `start` and
+`end` are PRESENT and `mid` is MISSING. On the known failure the proxy still
+reported the same `usage.prompt_tokens` and `usage.input_tokens`, with
+`reasoning_tokens` 0, HTTP 200, and `finish_reason` stop.
+
+Pass the endpoint with `--base-url` or `LLMINSPECTOR_BASE_URL`, and the key with
+`--api-key` or `LLMINSPECTOR_API_KEY`. There is no default host. The key is never
+printed. Request starts are at least 4.2 seconds apart.
+
+    llminspector middle-drop --models glm-5.3 --efforts low --iterations 30
+
 ## Install (when packaged)
 
 ```bash
 pip install -e .
-whichllm --help
+llminspector --help
 ```
 
 ## License

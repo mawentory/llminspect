@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>whichllm identity-benchmark findings</title>
+  <title>llminspector identity-benchmark findings</title>
   <style>
     :root { color-scheme: light dark; }
     body { font-family: ui-sans-serif, system-ui, sans-serif; line-height: 1.5; max-width: 52rem; margin: 2rem auto; padding: 0 1.25rem; }
@@ -23,16 +23,16 @@
   </style>
 </head>
 <body>
-  <h1>whichllm identity-benchmark findings</h1>
+  <h1>llminspector identity-benchmark findings</h1>
   <p class="meta">Living report. New sections are appended as primary sources are read. Goal: a closed-set identity protocol that names the served model and accounts for false positives. Unlimited tokens/requests is assumed for the recommended protocol, not spent in this research pass.</p>
-  <p class="meta">Repo: <a href="https://github.com/mawentory/whichllm">mawentory/whichllm</a>. Work product of a research goal; scanners are not implemented here.</p>
+  <p class="meta">Repo: <a href="https://github.com/mawentory/llm-inspector">mawentory/llm-inspector</a>. Work product of a research goal; scanners are not implemented here.</p>
 
   <h2 id="append-log">Append log</h2>
   <ol class="log">
     <li><strong>2026-09-16 00:20Z</strong> — seeded report skeleton, signal taxonomy, and non-goals (personality/censorship probes out of identity evidence).</li>
     <li><strong>2026-09-16 01:10Z</strong> — cloned primary repos under <code>/tmp</code>; extracted Kimi Vendor Verifier identity-contract pattern; tokenizer differential; one-token JSD paper; TokenPrint white-box contrast; DeepSeek/GLM official analog search.</li>
     <li><strong>2026-09-16 01:25Z</strong> — user direction: treat Kimi Vendor Verifier as the process reference for true identity (official contract vs vendor), not merely a capability leaderboard.</li>
-    <li><strong>2026-09-16 01:40Z</strong> — published tracer-bullet GitHub issues #1–#7 on mawentory/whichllm via /to-tickets subagents (identity contract, zoo ranker, feature preflight, JSD uncertain band, reasoning/system-prompt FPs, same-vocab vs KVV benches, enrollment drift).</li>
+    <li><strong>2026-09-16 01:40Z</strong> — published tracer-bullet GitHub issues #1–#7 on mawentory/llm-inspector via /to-tickets subagents (identity contract, zoo ranker, feature preflight, JSD uncertain band, reasoning/system-prompt FPs, same-vocab vs KVV benches, enrollment drift).</li>
     <li><strong>2026-09-16 02:05Z</strong> — account for misconfiguration underperformance (not a swap) and visible Anthropic-style JSON/headers as stack DNA false positives.</li>
   </ol>
 
@@ -82,7 +82,7 @@
     <li><strong>Then</strong> capability benches (OCRBench, MMMU, BEAM, DeepSWE) scored against the official row (Moonshot 0.89 / 0.82 / 0.31 / 0.675 at thinking=max). Pre-flight must pass first.</li>
   </ol>
   <p>Also record aggregator vs upstream usage: KVV insists on stream-reported <code>usage.prompt_tokens</code> from the vendor path, not an aggregator estimate.</p>
-  <p>Identity implication for whichllm: copy this <em>shape</em> for every claimed model family. Enrollment = official tokenizer + template + feature contract + official-API behavioral reference. Audit = vendor must match those constants. Capability scores are a serving-fidelity bar, not a unique ID: Fireworks/Together already sit within a few points of Moonshot on OCRBench without that proving they could not be a slightly different K3 build.</p>
+  <p>Identity implication for llminspector: copy this <em>shape</em> for every claimed model family. Enrollment = official tokenizer + template + feature contract + official-API behavioral reference. Audit = vendor must match those constants. Capability scores are a serving-fidelity bar, not a unique ID: Fireworks/Together already sit within a few points of Moonshot on OCRBench without that proving they could not be a slightly different K3 build.</p>
   <p class="warn"><strong>False-positive modes inside KVV itself.</strong> The +3 prompt-token overcount can hide a nearby template. OCR/DeepSWE proximity can match a different strong coding model. The skipped 539-token oracle means one independent tokenism check is not currently gating CI. Vision cases depend on exact image bytes/dimensions. Stream usage location is Kimi-specific (<code>choices[].usage</code> or top-level).</p>
 
   <h2 id="tokenizer-clones">Tokenizer differential (cloned sources)</h2>
@@ -106,7 +106,7 @@
     <li>System prompt is load-bearing (Tosea README: swapping only the system prompt shifts JSD ≈ 0.44–0.46, impostor magnitude).</li>
     <li>Gao et al. cited: 11/31 Llama commercial endpoints incompatible with vendor reference weights.</li>
   </ul>
-  <p>whichllm must never emit a binary “this is model X” from one JSD. The identity benchmark’s default is <strong>match / uncertain / mismatch / insufficient</strong>, with EER published on the protocol.</p>
+  <p>llminspector must never emit a binary “this is model X” from one JSD. The identity benchmark’s default is <strong>match / uncertain / mismatch / insufficient</strong>, with EER published on the protocol.</p>
 
   <h2 id="tokenprint">TokenPrint (arXiv:2608.08139) — white-box contrast</h2>
   <p><a href="https://arxiv.org/html/2608.08139v1">Wu, Zhao, Chen</a>: top-k vocabulary projections of late hidden states on 250 probes; Jaccard of decoded strings. Requires forward passes / logits, not a chat API. Useful warnings for black-box identity:</p>
@@ -114,7 +114,7 @@
     <li>Output-space similarity does <em>not</em> reliably name the exact parent: R1 distillations retrieve documented base in top-2 but first in only 1/5; Instruct siblings outrank bases.</li>
     <li>Identical-data models with no shared weights score 0.48 raw — shared corpora look like family.</li>
     <li>int4 Jaccard 0.82–0.85 vs max cross-model 0.81: aggressive quantization can sit on the identity boundary.</li>
-    <li>Authors refuse standalone proof of training history. Same humility belongs in whichllm tickets.</li>
+    <li>Authors refuse standalone proof of training history. Same humility belongs in llminspector tickets.</li>
   </ul>
 
   <h2 id="overlap-clones">Overlap among cloned fingerprint tools</h2>
@@ -159,7 +159,7 @@
   <p><strong>Kimi (official):</strong> <a href="https://github.com/MoonshotAI/Kimi-Vendor-Verifier">MoonshotAI/Kimi-Vendor-Verifier</a> is the first-party vendor-verifier. K3 table compares Moonshot, Fireworks, Baseten, Together, DigitalOcean, Inferact vLLM, Nebius, Modal on OCRBench / MMMU Pro Vision / BEAM(1M) / DeepSWE. Identity-relevant pieces are the pytest contracts (<code>prompt_tokens</code>, params, k3_features, tool schemas), not the leaderboard alone.</p>
   <p class="gap"><strong>DeepSeek — no official analog found.</strong> Searched GitHub orgs/products: <code>deepseek-ai</code> vendor/verifier/fingerprint repos via <code>gh search repos --owner=deepseek-ai</code> (empty); web search for official vendor-verifier / prompt_tokens contract. What exists is third-party: <a href="https://github.com/karminski/LLM-Vendor-Verfier">karminski/LLM-Vendor-Verfier</a> (cloned <code>/tmp/LLM-Vendor-Verfier</code>) compares tool-call similarity of resellers to <code>deepseek-official</code> (description: “Verify whether the LLM vendor has used quantitative models”). Also <a href="https://github.com/FLock-io/Vendor-Verifier">FLock-io/Vendor-Verifier</a> (generic tool-call vs baseline). Neither is a DeepSeek-published identity contract with tokenizer goldens. DeepSeek publishes model cards and API docs, not a KVV-style vendor battery.</p>
   <p class="gap"><strong>GLM / Z.ai — no official analog found.</strong> Searched <code>zai-org</code>, <code>THUDM</code>, docs.z.ai / Hugging Face cookbooks. Hits are training reward “verifiers” (<code>zai-org/GLM-V</code> <code>glmv_reward</code> math/OCR judges) and vLLM serve flags (<code>--tool-call-parser glm47</code>), plus Z.ai Code Bench as an in-house <em>capability</em> eval on the GLM-5.3 blog — not a third-party serving-identity harness with prompt_token goldens. GLM-5.3 uses the GLM-5.2 base (post-training only), so tokenizer identity cannot separate 5.2 from 5.3.</p>
-  <p>whichllm should therefore: (1) adopt KVV’s contract shape as the identity reference implementation; (2) for DeepSeek/GLM, <em>construct</em> first-party-derived cases from published <code>tokenizer.json</code> + official API enrollment, and cite the official-gap rather than pretend a vendor-verifier repo exists.</p>
+  <p>llminspector should therefore: (1) adopt KVV’s contract shape as the identity reference implementation; (2) for DeepSeek/GLM, <em>construct</em> first-party-derived cases from published <code>tokenizer.json</code> + official API enrollment, and cite the official-gap rather than pretend a vendor-verifier repo exists.</p>
 
   <h2 id="protocol">Recommended identity protocol (unlimited tokens, one implementation per signal)</h2>
   <ol>
@@ -183,19 +183,19 @@
   <p>False positives both ways: “Anthropic headers ⇒ this is Claude” when the gateway is only translating; “JSON in the answer ⇒ different model” when the weights are real and the wrapper is dirty. Strip protocol envelopes before JSD. Keep header/id-prefix rows in stack DNA, never in the model-identity verdict.</p>
 
   <h2 id="tickets">Tickets published (to-tickets subagents)</h2>
-  <p>Tracker: <a href="https://github.com/mawentory/whichllm/issues">mawentory/whichllm issues</a>. Shape: what to build, acceptance criteria, blocked-by. Labels include <code>ready-for-agent</code>.</p>
+  <p>Tracker: <a href="https://github.com/mawentory/llm-inspector/issues">mawentory/llm-inspector issues</a>. Shape: what to build, acceptance criteria, blocked-by. Labels include <code>ready-for-agent</code>.</p>
   <table>
     <thead><tr><th>#</th><th>Title</th><th>Signal</th><th>Blocked by</th></tr></thead>
     <tbody>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/5">#5</a></td><td>Official prompt_tokens identity contract (Kimi Vendor Verifier shape)</td><td>KVV identity contract</td><td>none</td></tr>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/6">#6</a></td><td>One tokenizer zoo ranker for unknown/stealth claims</td><td>tokenizer differential</td><td>#5</td></tr>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/7">#7</a></td><td>Family feature-contract preflight</td><td>stack/API DNA</td><td>#5</td></tr>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/1">#1</a></td><td>One-token JSD verify with match/uncertain/mismatch/insufficient</td><td>behavioral identity + EER band</td><td>#5</td></tr>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/2">#2</a></td><td>Pin system prompt and disable reasoning or flag post-reasoning</td><td>false-positive accounting</td><td>#1</td></tr>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/3">#3</a></td><td>Same-vocab checkpoint disambiguation without treating KVV benches as identity</td><td>false-positive / capability split</td><td>#1</td></tr>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/4">#4</a></td><td>Reference enrollment drift and two-day confirmation</td><td>false-positive / EER</td><td>#1</td></tr>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/8">#8</a></td><td>Misconfiguration underperformance is not a model swap</td><td>false-positive / capability</td><td>#1, #5</td></tr>
-      <tr><td><a href="https://github.com/mawentory/whichllm/issues/9">#9</a></td><td>Visible Anthropic JSON/headers are stack DNA not Claude identity</td><td>false-positive / stack DNA</td><td>#1</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/5">#5</a></td><td>Official prompt_tokens identity contract (Kimi Vendor Verifier shape)</td><td>KVV identity contract</td><td>none</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/6">#6</a></td><td>One tokenizer zoo ranker for unknown/stealth claims</td><td>tokenizer differential</td><td>#5</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/7">#7</a></td><td>Family feature-contract preflight</td><td>stack/API DNA</td><td>#5</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/1">#1</a></td><td>One-token JSD verify with match/uncertain/mismatch/insufficient</td><td>behavioral identity + EER band</td><td>#5</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/2">#2</a></td><td>Pin system prompt and disable reasoning or flag post-reasoning</td><td>false-positive accounting</td><td>#1</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/3">#3</a></td><td>Same-vocab checkpoint disambiguation without treating KVV benches as identity</td><td>false-positive / capability split</td><td>#1</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/4">#4</a></td><td>Reference enrollment drift and two-day confirmation</td><td>false-positive / EER</td><td>#1</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/8">#8</a></td><td>Misconfiguration underperformance is not a model swap</td><td>false-positive / capability</td><td>#1, #5</td></tr>
+      <tr><td><a href="https://github.com/mawentory/llm-inspector/issues/9">#9</a></td><td>Visible Anthropic JSON/headers are stack DNA not Claude identity</td><td>false-positive / stack DNA</td><td>#1</td></tr>
     </tbody>
   </table>
 </body>
