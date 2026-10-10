@@ -22,8 +22,11 @@ from llminspector.middle_drop import (
     NEIGHBOR_BEFORE,
     ConfigError,
     MiddleDropOptions,
+    _StreamWatch,
     build_prompt,
+    call_metrics,
     classify,
+    counted_output,
     document_offset,
     parse_sse,
     redact,
@@ -181,6 +184,49 @@ def test_parse_sse_keeps_last_usage() -> None:
     assert usage_numbers({"completion_tokens_details": {}})["reasoning_tokens"] is None
 
 
+def test_tok_s_includes_reasoning_without_counting_it_twice() -> None:
+    included = counted_output(
+        {
+            "completion_tokens": 30,
+            "completion_tokens_details": {"reasoning_tokens": 22},
+        }
+    )
+    assert included == 30
+    separate = counted_output(
+        {"output_tokens": 4, "completion_tokens_details": {"reasoning_tokens": 12}}
+    )
+    assert separate == 16
+    watch = _StreamWatch()
+    started = time.monotonic()
+    watch.feed(
+        "data: "
+        + json.dumps({"choices": [{"delta": {"reasoning_content": "reason " * 40}}]})
+        + "\n",
+        started,
+    )
+    watch.feed(
+        "data: " + json.dumps({"choices": [{"delta": {"content": "<svg></svg>"}}]}) + "\n",
+        started,
+    )
+    live = call_metrics({}, watch.ttft_s, 2.0, watch.estimated, watch.reasoning_estimated)
+    assert live["reasoning_tokens"] > 0
+    assert live["output_tokens"] >= live["reasoning_tokens"]
+    assert live["tok_s"] is not None and live["tok_s"] > 0
+    final = call_metrics(
+        {
+            "completion_tokens": 30,
+            "completion_tokens_details": {"reasoning_tokens": 22},
+        },
+        0.4,
+        2.0,
+        watch.estimated,
+        watch.reasoning_estimated,
+    )
+    assert final["output_tokens"] == 30
+    assert final["reasoning_tokens"] == 22
+    assert final["tok_s"] == pytest.approx(30 / 1.6)
+
+
 def test_classify_drop_and_neighbors() -> None:
     observed = verdict_from(DROP_JSON)
     assert observed["neighbor_before"] == "MISSING"
@@ -251,6 +297,8 @@ def test_cli_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert top.value.code == 0
     top_text = capsys.readouterr().out
     assert "middle-drop" in top_text
+    assert "pelican" in top_text
+    assert "ui" in top_text
     _assert_public_text_clean(top_text)
 
     with pytest.raises(SystemExit) as sub:
@@ -266,7 +314,7 @@ def test_cli_help(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as version:
         main(["--version"])
     assert version.value.code == 0
-    assert capsys.readouterr().out.strip() == "llminspector 0.1.0"
+    assert capsys.readouterr().out.strip() == "llminspect 0.1.0"
 
     assert main([]) == 2
     captured = capsys.readouterr()

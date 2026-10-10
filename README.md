@@ -43,7 +43,7 @@ Prior art we are **not** vendoring wholesale:
 
 ## Middle-context drop
 
-`llminspector middle-drop` repeats one chat-completions body against an
+`llminspect middle-drop` repeats one chat-completions body against an
 OpenAI-compatible endpoint and checks whether the middle of the prompt
 survived. The body is identical on every call. A DROP means `start` and
 `end` are PRESENT and `mid` is MISSING. On the known failure the proxy still
@@ -54,13 +54,52 @@ Pass the endpoint with `--base-url` or `LLMINSPECTOR_BASE_URL`, and the key with
 `--api-key` or `LLMINSPECTOR_API_KEY`. There is no default host. The key is never
 printed. Request starts are at least 4.2 seconds apart.
 
-    llminspector middle-drop --models glm-5.3 --efforts low --iterations 30
+    llminspect middle-drop --models glm-5.3 --efforts low --iterations 30
+
+## Pelican
+
+`llminspect pelican` asks for one SVG of a pelican riding a bicycle. Each call
+is a single chat completion with no tools. The prompt is fixed. `max_tokens`
+is omitted unless you pass a positive `--max-tokens`. Reasoning effort
+defaults to `max`.
+
+The runner starts at 4 in-flight calls. A 429 lowers that cap by one, down to
+1, waits, and retries the same call. Five calls is the default.
+
+    llminspect pelican --models deepseek-v4.1-flash --iterations 5
+
+That writes `pelican/index.html` with every drawing on one scrollable page and
+serves it at `127.0.0.1:8765` until you stop the process. `--no-serve` only
+writes the files. The key and the endpoint use the same flags and environment
+variables as `middle-drop`.
+
+## Local form
+
+`llminspect ui` opens one page on `127.0.0.1` port `8787`. Enter the API key,
+the model, and the base URL, then run pelican, marker, or both.
+
+Pelican uses the fixed one-shot SVG prompt. Each call is one chat completion
+with no tools, and `max_tokens` is left unset. Marker is the middle-drop
+probe: filler around the start, middle, and end markers. The context size is
+that filler length in characters. A DROP means the middle marker was lost
+while the start and end were still present.
+
+Each test has its own run count. Both share one concurrency cap, which starts
+at 4. A 429 lowers the in-flight cap by one, down to 1, and retries that call.
+Pelican runs first, then marker. Reasoning effort defaults to `max`. While a
+call is in flight the page shows httpx errors, time to first token, tok/s, and
+input, output, reasoning, and cached tokens. tok/s updates while tokens are
+still arriving and counts reasoning tokens. Marker says Passed only when every run kept
+the middle marker. The form fields and past runs stay in the browser after a
+refresh. Stop ends the run, closes the calls still in flight, and leaves the
+rows and drawings already on the page. The page stays up until you stop the
+process. The key is sent only to the endpoint.
 
 ## Install (when packaged)
 
 ```bash
 pip install -e .
-llminspector --help
+llminspect --help
 ```
 
 ## License

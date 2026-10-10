@@ -23,7 +23,7 @@ tiktoken = ["tiktoken>=0.8"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
-llminspector = "llminspector.cli:main"
+llminspect = "llminspector.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -31,6 +31,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/llminspector"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/llminspector/ui_page.html" = "llminspector/ui_page.html"
 
 [tool.ruff]
 line-length = 100

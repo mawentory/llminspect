@@ -1,0 +1,543 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>llminspect</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #1c1915;
+    --muted: #5c564c;
+    --line: #d9d2c5;
+    --paper: #f6f1e7;
+    --card: #fffdf8;
+    --accent: #0f6e6b;
+    --accent-ink: #f4fffe;
+    --drop: #8c2f2f;
+    --ok: #1f6b3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.45 "Iowan Old Style", Palatino, Georgia, serif;
+  }
+  main { max-width: 920px; margin: 0 auto; padding: 28px 20px 64px; }
+  h1 { font-size: 32px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.03em; }
+  .lede { margin: 0 0 20px; color: var(--muted); }
+  form, .results {
+    background: var(--card);
+    border: 1px solid var(--line);
+    padding: 18px;
+  }
+  .results { margin-top: 18px; }
+  label { display: block; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  input[type="text"], input[type="password"], input[type="number"], input[type="url"] {
+    width: 100%;
+    margin-top: 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    font: 15px/1.3 ui-monospace, "Cascadia Code", monospace;
+  }
+  .grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+  .span-2 { grid-column: span 2; }
+  fieldset { border: 0; margin: 14px 0; padding: 0; }
+  .checks { display: flex; gap: 18px; }
+  .checks label { text-transform: none; letter-spacing: 0; font-size: 16px; color: var(--ink); }
+  .presets { display: flex; gap: 8px; margin-top: 8px; }
+  button {
+    font: 15px/1 ui-sans-serif, system-ui, sans-serif;
+    border: 1px solid var(--ink);
+    background: transparent;
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.stop { background: var(--drop); color: #fff; border-color: var(--drop); }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .actions { display: flex; gap: 8px; align-items: center; }
+  .hint { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+  #status { min-height: 1.4em; margin: 12px 0 0; font-family: ui-monospace, monospace; font-size: 14px; }
+  .log { white-space: pre-wrap; font: 13px/1.4 ui-monospace, monospace; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font: 14px/1.3 ui-monospace, monospace; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .DROP, .MID_MISSING, .HTTP_ERROR, .fail, td.error { color: var(--drop); font-weight: 700; }
+  .PRESENT, .pass { color: var(--ok); font-weight: 700; }
+  .outcome { font-size: 22px; margin: 4px 0 8px; }
+  .scroll { overflow-x: auto; }
+  article.run { background: var(--card); border: 1px solid var(--line); padding: 18px; margin-top: 18px; }
+  svg { display: block; width: auto; height: auto; max-width: 100%; background: #fff; border: 1px solid var(--line); }
+  section.drawing { margin: 12px 0 20px; }
+  h2 { font-size: 22px; margin: 8px 0; }
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+    .span-2 { grid-column: auto; }
+  }
+</style>
+<main>
+  <h1>llminspect</h1>
+  <p class="lede">One endpoint, one model. Run a pelican drawing, a context-marker probe, or both.</p>
+  <form id="run-form">
+    <div class="grid">
+      <div class="span-2">
+        <label for="base-url">Base URL</label>
+        <input id="base-url" name="base_url" type="url" required placeholder="https://example.invalid/v1" autocomplete="off">
+      </div>
+      <div>
+        <label for="api-key">API key</label>
+        <input id="api-key" name="api_key" type="password" required autocomplete="off">
+      </div>
+      <div>
+        <label for="model">Model</label>
+        <input id="model" name="model" type="text" required placeholder="deepseek-v4.1-flash" autocomplete="off">
+      </div>
+    </div>
+    <fieldset>
+      <legend class="hint">Tests</legend>
+      <div class="checks">
+        <label><input id="test-pelican" name="pelican" type="checkbox" checked> Pelican</label>
+        <label><input id="test-marker" name="marker" type="checkbox"> Marker</label>
+      </div>
+    </fieldset>
+    <div class="grid">
+      <div id="pelican-runs-field">
+        <label for="pelican-runs">Pelican runs</label>
+        <input id="pelican-runs" name="pelican_runs" type="number" min="1" max="100" value="5">
+      </div>
+      <div id="marker-runs-field" hidden>
+        <label for="marker-runs">Marker runs</label>
+        <input id="marker-runs" name="marker_runs" type="number" min="1" max="100" value="5">
+      </div>
+      <div>
+        <label for="concurrency">Concurrency</label>
+        <input id="concurrency" name="concurrency" type="number" min="1" max="32" value="4">
+      </div>
+      <div>
+        <label for="effort">Reasoning effort</label>
+        <input id="effort" name="effort" type="text" value="max">
+      </div>
+    </div>
+    <div id="context-field" hidden>
+      <label for="context-chars">Marker context size (characters)</label>
+      <input id="context-chars" name="context_chars" type="number" min="1" max="2000000" value="423588">
+      <div class="presets">
+        <button type="button" data-chars="4096">4k</button>
+        <button type="button" data-chars="32768">32k</button>
+        <button type="button" data-chars="131072">128k</button>
+        <button type="button" data-chars="423588">423k</button>
+        <button type="button" data-chars="900000">900k</button>
+      </div>
+      <p class="hint">Filler placed around the start, middle, and end markers. A DROP means the middle marker was lost.</p>
+    </div>
+    <p class="actions">
+      <button class="primary" id="run-button" type="submit">Run</button>
+      <button class="stop" id="stop-button" type="button" hidden>Stop</button>
+    </p>
+    <p id="status" role="status"></p>
+  </form>
+  <div id="history"></div>
+</main>
+<script>
+const form = document.querySelector("#run-form");
+const pelicanBox = document.querySelector("#test-pelican");
+const markerBox = document.querySelector("#test-marker");
+const statusEl = document.querySelector("#status");
+const button = document.querySelector("#run-button");
+const stopButton = document.querySelector("#stop-button");
+const ACTIVE = ["queued", "running"];
+
+const FORM_KEY = "llminspect.form";
+const HISTORY_KEY = "llminspect.history";
+const FORM_FIELDS = [
+  ["#base-url", "value"],
+  ["#api-key", "value"],
+  ["#model", "value"],
+  ["#test-pelican", "checked"],
+  ["#test-marker", "checked"],
+  ["#pelican-runs", "value"],
+  ["#marker-runs", "value"],
+  ["#concurrency", "value"],
+  ["#effort", "value"],
+  ["#context-chars", "value"],
+];
+
+function syncFields() {
+  document.querySelector("#pelican-runs-field").hidden = !pelicanBox.checked;
+  document.querySelector("#marker-runs-field").hidden = !markerBox.checked;
+  document.querySelector("#context-field").hidden = !markerBox.checked;
+}
+
+function saveForm() {
+  const data = {};
+  FORM_FIELDS.forEach(([selector, prop]) => {
+    data[selector] = document.querySelector(selector)[prop];
+  });
+  localStorage.setItem(FORM_KEY, JSON.stringify(data));
+}
+
+function restoreForm() {
+  let data = null;
+  try {
+    data = JSON.parse(localStorage.getItem(FORM_KEY) || "null");
+  } catch (error) {
+    data = null;
+  }
+  if (!data || typeof data !== "object") return;
+  FORM_FIELDS.forEach(([selector, prop]) => {
+    if (!Object.prototype.hasOwnProperty.call(data, selector)) return;
+    const field = document.querySelector(selector);
+    if (prop === "checked") field.checked = Boolean(data[selector]);
+    else if (data[selector] != null) field.value = data[selector];
+  });
+}
+
+restoreForm();
+syncFields();
+form.addEventListener("input", () => { saveForm(); syncFields(); });
+form.addEventListener("change", () => { saveForm(); syncFields(); });
+document.querySelectorAll("[data-chars]").forEach((preset) => {
+  preset.addEventListener("click", () => {
+    document.querySelector("#context-chars").value = preset.dataset.chars;
+    saveForm();
+  });
+});
+
+function text(tag, value) {
+  const node = document.createElement(tag);
+  node.textContent = value;
+  return node;
+}
+
+function mountSvg(host, svg) {
+  const lower = svg.toLowerCase();
+  const banned = ["<script", "onload=", "onclick=", "onerror=", "javascript:", "foreignobject"];
+  if (!lower.includes("<svg") || banned.some((token) => lower.includes(token))) {
+    host.append(text("p", "SVG was saved but not embedded."));
+    return;
+  }
+  const frame = document.createElement("div");
+  frame.innerHTML = svg;
+  host.append(frame);
+}
+
+function fixed(value, digits) {
+  if (value == null || value === "") return "";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return number.toFixed(digits);
+}
+
+function markerCopy(marker) {
+  const records = (marker && marker.records) || [];
+  if (marker && marker.headline && marker.outcome) {
+    return { outcome: marker.outcome, headline: marker.headline };
+  }
+  const kept = records.filter((row) => row.verdict_class === "PRESENT").length;
+  const dropped = records.filter((row) => row.verdict_class === "DROP").length;
+  if (records.length && kept === records.length) {
+    return { outcome: "pass", headline: "Passed. All " + kept + " runs kept the middle marker." };
+  }
+  if (!records.length) return { outcome: "running", headline: "Waiting for marker results." };
+  return {
+    outcome: "fail",
+    headline: "Failed. " + dropped + " dropped the middle, " + kept + " kept it.",
+  };
+}
+
+function rowResult(verdict) {
+  if (verdict === "PRESENT") return ["Pass", "pass"];
+  if (!verdict) return ["", ""];
+  return ["Fail", "fail"];
+}
+
+function renderCalls(host, calls) {
+  if (!calls || !calls.length) return;
+  const wrap = document.createElement("div");
+  wrap.className = "scroll";
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  ["Call", "State", "Try", "HTTP", "TTFT", "tok/s", "In", "Out", "Reason", "Cache", "Elapsed", "Error"].forEach((label) => {
+    const cell = text("th", label);
+    if (label === "TTFT") cell.title = "Time to first token, including reasoning";
+    if (label === "tok/s") cell.title = "Tokens per second since the first token, including reasoning";
+    if (label === "Out") cell.title = "Output tokens, including reasoning";
+    if (label === "Reason") cell.title = "Reasoning tokens included in Out";
+    head.append(cell);
+  });
+  table.append(head);
+  calls.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.append(text("td", (row.kind || "") + " " + row.index));
+    tr.append(text("td", row.state || ""));
+    tr.append(text("td", row.attempt == null ? "" : String(row.attempt)));
+    tr.append(text("td", row.http == null ? "" : String(row.http)));
+    tr.append(text("td", fixed(row.ttft_s, 3)));
+    tr.append(text("td", fixed(row.tok_s, 1)));
+    const incoming = row.input_tokens != null ? row.input_tokens : row.prompt_tokens;
+    tr.append(text("td", incoming == null ? "" : String(incoming)));
+    tr.append(text("td", row.output_tokens == null ? "" : String(row.output_tokens)));
+    tr.append(text("td", row.reasoning_tokens == null ? "" : String(row.reasoning_tokens)));
+    tr.append(text("td", row.cached_tokens == null ? "" : String(row.cached_tokens)));
+    tr.append(text("td", fixed(row.elapsed_s, 1)));
+    const error = text("td", row.error || "");
+    error.className = "error";
+    tr.append(error);
+    table.append(tr);
+  });
+  wrap.append(table);
+  host.append(wrap);
+}
+
+function renderJob(job) {
+  const article = document.createElement("article");
+  article.className = "run";
+  article.dataset.id = job.id || "";
+  const title = (job.model || "run") + " · " + (job.status || "");
+  article.append(text("h2", title));
+  if (job.base_url) article.append(text("p", job.base_url));
+  renderCalls(article, job.calls);
+  if (job.pelican && job.pelican.length) {
+    article.append(text("h2", "Pelican"));
+    job.pelican.forEach((sample) => {
+      const section = document.createElement("section");
+      section.className = "drawing";
+      section.append(text("h3", (sample.model || "") + " run " + sample.index));
+      const metrics = [
+        sample.ttft_s != null ? "TTFT " + fixed(sample.ttft_s, 3) + "s" : "",
+        sample.tok_s != null ? fixed(sample.tok_s, 1) + " tok/s" : "",
+        sample.reasoning_tokens != null ? sample.reasoning_tokens + " reasoning" : "",
+        sample.input_tokens != null ? "in " + sample.input_tokens : "",
+        sample.output_tokens != null ? "out " + sample.output_tokens : "",
+        sample.cached_tokens != null ? "cache " + sample.cached_tokens : "",
+      ].filter(Boolean).join(" · ");
+      if (metrics) section.append(text("p", metrics));
+      if (sample.embed && sample.svg) mountSvg(section, sample.svg);
+      else if (sample.error) section.append(text("p", sample.error));
+      article.append(section);
+    });
+  }
+  if (job.marker) {
+    article.append(text("h2", "Marker"));
+    const copy = markerCopy(job.marker);
+    const banner = text("p", copy.headline);
+    banner.className = "outcome " + (copy.outcome === "pass" ? "pass" : copy.outcome === "fail" ? "fail" : "");
+    article.append(banner);
+    const wrap = document.createElement("div");
+    wrap.className = "scroll";
+    const table = document.createElement("table");
+    const head = document.createElement("tr");
+    ["Run", "Result", "Verdict", "HTTP", "TTFT", "tok/s", "In", "Out", "Reason", "Cache"].forEach((label) => {
+      const cell = text("th", label);
+      if (label === "tok/s") cell.title = "Tokens per second since the first token, including reasoning";
+      head.append(cell);
+    });
+    table.append(head);
+    (job.marker.records || []).forEach((row) => {
+      const tr = document.createElement("tr");
+      tr.append(text("td", String(row.i)));
+      const [label, tone] = rowResult(row.verdict_class);
+      const result = text("td", label);
+      result.className = tone;
+      tr.append(result);
+      const verdict = text("td", row.verdict_class || "");
+      verdict.className = row.verdict_class || "";
+      tr.append(verdict);
+      tr.append(text("td", row.http == null ? "" : String(row.http)));
+      tr.append(text("td", fixed(row.ttft_s, 3)));
+      tr.append(text("td", fixed(row.tok_s, 1)));
+      const incoming = row.input_tokens != null ? row.input_tokens : row.prompt_tokens;
+      tr.append(text("td", incoming == null ? "" : String(incoming)));
+      const outgoing = row.output_tokens != null ? row.output_tokens : row.completion_tokens;
+      tr.append(text("td", outgoing == null ? "" : String(outgoing)));
+      tr.append(text("td", row.reasoning_tokens == null ? "" : String(row.reasoning_tokens)));
+      tr.append(text("td", row.cached_tokens == null ? "" : String(row.cached_tokens)));
+      table.append(tr);
+    });
+    wrap.append(table);
+    article.append(wrap);
+  }
+  if (job.error) article.append(text("p", job.error));
+  const log = document.createElement("pre");
+  log.className = "log";
+  log.textContent = (job.log || []).join("\n");
+  article.append(log);
+  return article;
+}
+
+function loadHistory() {
+  try {
+    const items = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(items) ? items : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function persistHistory(items) {
+  const trimmed = items.slice(0, 20).map((job) => {
+    const copy = Object.assign({}, job);
+    delete copy.api_key;
+    return copy;
+  });
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+  } catch (error) {
+    const lighter = trimmed.slice(0, 8).map((job) => Object.assign({}, job, { log: [] }));
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(lighter));
+      return lighter;
+    } catch (again) {
+      return trimmed;
+    }
+  }
+  return trimmed;
+}
+
+function renderHistory(items) {
+  const host = document.querySelector("#history");
+  host.replaceChildren();
+  items.forEach((job) => host.append(renderJob(job)));
+  const running = items.find((job) => ACTIVE.includes(job.status));
+  button.disabled = Boolean(running);
+  stopButton.hidden = !running;
+  stopButton.disabled = false;
+  if (running) {
+    const cap = running.concurrency || 0;
+    const inflight = running.inflight || 0;
+    statusEl.textContent = "Running " + (running.phase || "tests") + " · " + inflight + "/" + cap + " in flight";
+  }
+}
+
+function remember(job) {
+  const items = loadHistory().filter((item) => item.id !== job.id);
+  items.unshift(job);
+  const saved = persistHistory(items);
+  renderHistory(saved);
+  return saved;
+}
+
+function markStopped(id) {
+  const items = loadHistory().map((job) => {
+    if (job.id !== id) return job;
+    if (job.status === "stopped" || job.status === "done" || job.status === "error") return job;
+    return Object.assign({}, job, { status: "stopped", phase: "stopped" });
+  });
+  const saved = persistHistory(items);
+  renderHistory(saved);
+}
+
+async function poll(id) {
+  let response;
+  try {
+    response = await fetch("/api/runs/" + id);
+  } catch (error) {
+    markStopped(id);
+    return;
+  }
+  if (!response.ok) {
+    markStopped(id);
+    return;
+  }
+  const job = await response.json();
+  remember(job);
+  if (ACTIVE.includes(job.status)) {
+    setTimeout(() => poll(id), 400);
+  } else if (job.status === "stopped") {
+    statusEl.textContent = "stopped";
+  } else if (!job.error) {
+    statusEl.textContent = "done";
+  } else {
+    statusEl.textContent = job.error;
+  }
+}
+
+stopButton.addEventListener("click", async () => {
+  const running = loadHistory().find((job) => ACTIVE.includes(job.status));
+  if (!running || !running.id) return;
+  remember(Object.assign({}, running, { status: "stopped", phase: "stopped" }));
+  statusEl.textContent = "stopped";
+  let response;
+  try {
+    response = await fetch("/api/runs/" + running.id + "/stop", { method: "POST" });
+  } catch (error) {
+    return;
+  }
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch (error) {
+    payload = {};
+  }
+  if (!response.ok && response.status !== 409) {
+    statusEl.textContent = payload.error || "Could not stop.";
+    return;
+  }
+  poll(running.id);
+});
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  saveForm();
+  if (!pelicanBox.checked && !markerBox.checked) {
+    statusEl.textContent = "Choose pelican, marker, or both.";
+    return;
+  }
+  button.disabled = true;
+  stopButton.hidden = false;
+  statusEl.textContent = "Starting…";
+  const body = {
+    base_url: document.querySelector("#base-url").value,
+    api_key: document.querySelector("#api-key").value,
+    model: document.querySelector("#model").value,
+    effort: document.querySelector("#effort").value,
+    pelican: pelicanBox.checked,
+    marker: markerBox.checked,
+    pelican_runs: Number(document.querySelector("#pelican-runs").value),
+    marker_runs: Number(document.querySelector("#marker-runs").value),
+    concurrency: Number(document.querySelector("#concurrency").value),
+    context_chars: Number(document.querySelector("#context-chars").value),
+  };
+  const response = await fetch("/api/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    statusEl.textContent = payload.error || "Could not start.";
+    button.disabled = false;
+    return;
+  }
+  poll(payload.id);
+});
+
+async function boot() {
+  const local = loadHistory();
+  renderHistory(local);
+  try {
+    const response = await fetch("/api/runs");
+    if (!response.ok) return;
+    const body = await response.json();
+    const remote = Array.isArray(body.runs) ? body.runs : [];
+    const ids = new Set(remote.map((job) => job.id));
+    const merged = remote.concat(
+      local
+        .filter((job) => job.id && !ids.has(job.id))
+        .map((job) => ACTIVE.includes(job.status)
+          ? Object.assign({}, job, { status: "stopped", phase: "stopped" })
+          : job)
+    );
+    const saved = persistHistory(merged);
+    renderHistory(saved);
+    saved
+      .filter((job) => ACTIVE.includes(job.status))
+      .forEach((job) => poll(job.id));
+  } catch (error) {
+    local
+      .filter((job) => ACTIVE.includes(job.status))
+      .forEach((job) => poll(job.id));
+  }
+}
+boot();
+</script>

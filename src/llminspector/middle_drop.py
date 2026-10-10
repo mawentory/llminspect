@@ -64,9 +64,7 @@ class MiddleDropOptions:
 def build_prompt(filler_chars: int = FILLER_CHARS) -> str:
     half = filler_chars // 2
     left = (FILLER_UNIT * ((half // len(FILLER_UNIT)) + 2))[:half]
-    right = (FILLER_UNIT * (((filler_chars - half) // len(FILLER_UNIT)) + 2))[
-        : filler_chars - half
-    ]
+    right = (FILLER_UNIT * (((filler_chars - half) // len(FILLER_UNIT)) + 2))[: filler_chars - half]
     task = (
         "Audit the document below for three exact markers and the two neighbor "
         "tokens that sit on the lines immediately before and after the middle "
@@ -229,11 +227,7 @@ def verdict_from(text: str) -> dict[str, str | None]:
 
 def classify(verdict: dict[str, Any]) -> str:
     mid = verdict.get("mid")
-    if (
-        verdict.get("start") == "PRESENT"
-        and verdict.get("end") == "PRESENT"
-        and mid == "MISSING"
-    ):
+    if verdict.get("start") == "PRESENT" and verdict.get("end") == "PRESENT" and mid == "MISSING":
         return "DROP"
     if mid == "MISSING":
         return "MID_MISSING"
@@ -260,6 +254,122 @@ def usage_numbers(usage: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def estimate_tokens(text: str) -> int:
+    """Rough token count for a live rate before the provider sends usage."""
+    cjk = 0
+    other = 0
+    for ch in text:
+        code = ord(ch)
+        if (
+            0x3400 <= code <= 0x9FFF
+            or 0x3040 <= code <= 0x30FF
+            or 0xAC00 <= code <= 0xD7AF
+            or 0xF900 <= code <= 0xFAFF
+            or 0xFF00 <= code <= 0xFFEF
+        ):
+            cjk += 1
+        elif not ch.isspace():
+            other += 1
+    if cjk == 0 and other == 0:
+        return 0
+    return cjk + (other + 3) // 4
+
+
+def _whole_number(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = int(value)
+    if number <= 0:
+        return None
+    return number
+
+
+def counted_output(usage: dict[str, Any] | None, streamed: int | None = None) -> int | None:
+    """Tokens that should move tok/s. Reasoning is included once.
+
+    OpenAI-compatible `completion_tokens` already includes reasoning. A gateway
+    that reports reasoning beside a smaller answer count is added instead.
+    """
+    numbers = usage_numbers(usage or {})
+    completion = _whole_number(numbers.get("completion_tokens"))
+    output = _whole_number(numbers.get("output_tokens"))
+    reasoning = _whole_number(numbers.get("reasoning_tokens")) or 0
+    if completion is not None:
+        if reasoning > completion:
+            return completion + reasoning
+        return completion
+    if output is not None:
+        return output + reasoning
+    if reasoning:
+        return max(reasoning, streamed or 0)
+    if streamed:
+        return streamed
+    return None
+
+
+def tokens_per_second(
+    output_tokens: Any,
+    ttft_s: float | None,
+    elapsed_s: float,
+) -> float | None:
+    if isinstance(output_tokens, bool) or not isinstance(output_tokens, (int, float)):
+        return None
+    if output_tokens <= 0 or elapsed_s <= 0:
+        return None
+    window = elapsed_s
+    if (
+        isinstance(ttft_s, (int, float))
+        and not isinstance(ttft_s, bool)
+        and 0 <= ttft_s < elapsed_s
+    ):
+        window = elapsed_s - ttft_s
+    if window <= 0:
+        window = elapsed_s
+    return float(output_tokens) / window
+
+
+def call_metrics(
+    usage: dict[str, Any] | None,
+    ttft_s: float | None,
+    elapsed_s: float,
+    streamed_tokens: int | None = None,
+    streamed_reasoning: int | None = None,
+) -> dict[str, Any]:
+    numbers = usage_numbers(usage or {})
+    output = counted_output(numbers, streamed_tokens)
+    incoming = numbers.get("input_tokens")
+    if incoming is None:
+        incoming = numbers.get("prompt_tokens")
+    reasoning = numbers.get("reasoning_tokens")
+    if reasoning is None and streamed_reasoning:
+        reasoning = streamed_reasoning
+        if output is not None and reasoning > output:
+            reasoning = output
+    return {
+        "prompt_tokens": numbers.get("prompt_tokens"),
+        "input_tokens": incoming,
+        "output_tokens": output,
+        "completion_tokens": numbers.get("completion_tokens"),
+        "reasoning_tokens": reasoning,
+        "cached_tokens": numbers.get("cached_tokens"),
+        "ttft_s": ttft_s,
+        "elapsed_s": elapsed_s,
+        "tok_s": tokens_per_second(output, ttft_s, elapsed_s),
+    }
+
+
+def format_transport_error(exc: BaseException, secret: str) -> str:
+    name = type(exc).__name__
+    detail = redact(str(exc), secret).strip()
+    if detail.startswith(f"{name}:"):
+        message = detail
+    elif detail:
+        message = f"{name}: {detail}"
+    else:
+        message = name
+    return message[:500]
+
+
 def _configured(cli_value: str | None, env_value: str | None) -> str:
     if cli_value is not None and cli_value.strip():
         return cli_value.strip()
@@ -276,7 +386,7 @@ def resolve_base_url(
     raw = _configured(cli_value, env.get("LLMINSPECTOR_BASE_URL"))
     if not raw:
         raise ConfigError("missing base URL: pass --base-url or set LLMINSPECTOR_BASE_URL")
-    if not (raw.startswith("http://") or raw.startswith("https://")):
+    if not raw.startswith(("http://", "https://")):
         raise ConfigError("base URL must start with http:// or https://")
     return raw.rstrip("/")
 
@@ -317,12 +427,155 @@ def _error_text(exc: BaseException, secret: str) -> str:
     return f"{type(exc).__name__}: {redact(str(exc), secret)}"
 
 
+class _StreamWatch:
+    """Pull TTFT and usage out of an SSE body as chunks arrive."""
+
+    def __init__(self) -> None:
+        self.pending = ""
+        self.ttft_s: float | None = None
+        self.usage: dict[str, Any] = {}
+        self.cjk = 0
+        self.other = 0
+        self.reasoning_estimated = 0
+
+    @property
+    def estimated(self) -> int:
+        if self.cjk == 0 and self.other == 0:
+            return 0
+        return self.cjk + (self.other + 3) // 4
+
+    def _add_text(self, text: str) -> None:
+        for ch in text:
+            code = ord(ch)
+            if (
+                0x3400 <= code <= 0x9FFF
+                or 0x3040 <= code <= 0x30FF
+                or 0xAC00 <= code <= 0xD7AF
+                or 0xF900 <= code <= 0xFAFF
+                or 0xFF00 <= code <= 0xFFEF
+            ):
+                self.cjk += 1
+            elif not ch.isspace():
+                self.other += 1
+
+    def feed(self, text: str, started: float) -> set[str]:
+        self.pending += text
+        changed: set[str] = set()
+        while "\n" in self.pending:
+            line, self.pending = self.pending.split("\n", 1)
+            kind = self._line(line, started)
+            changed.update(kind)
+        return changed
+
+    def finish(self, started: float) -> set[str]:
+        if not self.pending.strip():
+            return set()
+        changed = self._line(self.pending, started)
+        self.pending = ""
+        return changed
+
+    def _line(self, line: str, started: float) -> set[str]:
+        line = line.rstrip("\r")
+        if not line.startswith("data:"):
+            return set()
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            return set()
+        try:
+            obj = json.loads(payload)
+        except json.JSONDecodeError:
+            return set()
+        if not isinstance(obj, dict):
+            return set()
+        changed: set[str] = set()
+        if isinstance(obj.get("usage"), dict):
+            self.usage = obj["usage"]
+            changed.add("usage")
+        content, reasoning = _delta_parts(obj)
+        piece = content + reasoning
+        if piece.strip():
+            self._add_text(piece)
+            if reasoning.strip():
+                self.reasoning_estimated += estimate_tokens(reasoning)
+            changed.add("text")
+            if self.ttft_s is None:
+                self.ttft_s = time.monotonic() - started
+                changed.add("ttft")
+        return changed
+
+
+def _delta_parts(obj: dict[str, Any]) -> tuple[str, str]:
+    choices = obj.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return "", ""
+    choice = choices[0]
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    delta = choice.get("delta")
+    if isinstance(delta, dict):
+        content = delta.get("content")
+        if isinstance(content, str) and content:
+            content_parts.append(content)
+        if "reasoning_content" in delta:
+            reasoning = delta.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                reasoning_parts.append(reasoning)
+        elif isinstance(delta.get("reasoning"), str) and delta["reasoning"]:
+            reasoning_parts.append(delta["reasoning"])
+    message = choice.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            content_parts.append(content)
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
+        if isinstance(reasoning, str) and reasoning:
+            reasoning_parts.append(reasoning)
+    return "".join(content_parts), "".join(reasoning_parts)
+
+
+def _delta_text(obj: dict[str, Any]) -> str:
+    content, reasoning = _delta_parts(obj)
+    return content + reasoning
+
+
+def _delta_has_token(obj: dict[str, Any]) -> bool:
+    choices = obj.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return False
+    choice = choices[0]
+    delta = choice.get("delta")
+    if isinstance(delta, dict):
+        for key in ("content", "reasoning_content", "reasoning"):
+            piece = delta.get(key)
+            if isinstance(piece, str) and piece.strip():
+                return True
+    message = choice.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return True
+    return False
+
+
+def _close_network_stream(box: dict[str, Any], lock: threading.Lock) -> None:
+    with lock:
+        stream = box.get("stream")
+    if stream is None:
+        return
+    try:
+        stream.close()
+    except Exception:  # noqa: BLE001
+        return
+
+
 def stream_chat(
     base_url: str,
     api_key: str,
     body: bytes,
     timeout: float,
     client: httpx.Client,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+    cancel: threading.Event | None = None,
 ) -> dict[str, Any]:
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {
@@ -340,8 +593,33 @@ def stream_chat(
         "http": None,
         "raw": bytearray(),
         "timed_out": False,
+        "stopped": False,
         "error": None,
+        "error_text": None,
     }
+    watch = _StreamWatch()
+
+    def cancelled() -> bool:
+        return cancel is not None and cancel.is_set()
+
+    def notify(event: dict[str, Any]) -> None:
+        if on_event is None:
+            return
+        on_event(event)
+
+    def snapshot(state: str, *, error: str | None = None) -> dict[str, Any]:
+        elapsed = time.monotonic() - started
+        metrics = call_metrics(
+            watch.usage, watch.ttft_s, elapsed, watch.estimated, watch.reasoning_estimated
+        )
+        event = {"state": state, **metrics}
+        if box["http"] is not None:
+            event["http"] = box["http"]
+        if error is not None:
+            event["error"] = error
+        if box["timed_out"]:
+            event["timed_out"] = True
+        return event
 
     def worker() -> None:
         try:
@@ -355,41 +633,131 @@ def stream_chat(
             ) as response:
                 with lock:
                     box["http"] = response.status_code
+                    box["stream"] = response.extensions.get("network_stream")
+                status = response.status_code
+                if status >= 400:
+                    reason = response.reason_phrase or ""
+                    label = f"HTTP {status} {reason}".strip()
+                    notify(snapshot("error", error=label))
+                else:
+                    notify(snapshot("http"))
                 for chunk in response.iter_bytes():
+                    if cancelled():
+                        with lock:
+                            box["stopped"] = True
+                            box["error_text"] = "stopped"
+                        notify(snapshot("stopped", error="stopped"))
+                        return
                     if time.monotonic() >= deadline:
                         with lock:
                             box["timed_out"] = True
+                            box["error_text"] = "Timeout: wall clock exceeded"
+                        notify(snapshot("error", error=box["error_text"]))
                         return
                     if chunk:
                         with lock:
                             box["raw"].extend(chunk)
+                        changed = watch.feed(chunk.decode("utf-8", errors="replace"), started)
+                        if status >= 400:
+                            snippet = redact(
+                                bytes(box["raw"]).decode("utf-8", errors="replace"),
+                                api_key,
+                            )[:240]
+                            notify(snapshot("error", error=f"HTTP {status}: {snippet}".strip()))
+                        elif changed:
+                            state = "streaming" if watch.ttft_s is not None else "http"
+                            notify(snapshot(state))
                     if time.monotonic() >= deadline:
                         with lock:
                             box["timed_out"] = True
+                            box["error_text"] = "Timeout: wall clock exceeded"
+                        notify(snapshot("error", error=box["error_text"]))
                         return
-        except httpx.TimeoutException:
+                watch.finish(started)
+        except httpx.TimeoutException as exc:
+            if cancelled():
+                with lock:
+                    box["stopped"] = True
+                    box["error_text"] = "stopped"
+                notify(snapshot("stopped", error="stopped"))
+                return
+            message = format_transport_error(exc, api_key)
             with lock:
                 box["timed_out"] = True
-        except Exception as exc:
+                box["error_text"] = message
+            notify(snapshot("error", error=message))
+        except Exception as exc:  # noqa: BLE001
+            if cancelled():
+                with lock:
+                    box["stopped"] = True
+                    box["error_text"] = "stopped"
+                notify(snapshot("stopped", error="stopped"))
+                return
+            message = format_transport_error(exc, api_key)
             with lock:
                 box["error"] = exc
+                box["error_text"] = message
+            notify(snapshot("error", error=message))
 
     thread = threading.Thread(target=worker, name="middle-drop-stream", daemon=True)
     thread.start()
-    thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    while thread.is_alive():
+        if cancelled():
+            _close_network_stream(box, lock)
+            thread.join(timeout=2.0)
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        thread.join(timeout=min(0.2, remaining))
     elapsed = time.monotonic() - started
     with lock:
         status = box["http"]
         raw = bytes(box["raw"])
         timed_out = bool(box["timed_out"])
+        stopped = bool(box["stopped"]) or cancelled()
         error = box["error"]
+        error_text = box["error_text"]
+    if stopped:
+        notify({"state": "stopped", "error": "stopped", "elapsed_s": elapsed, "http": status})
+        metrics = call_metrics(
+            watch.usage, watch.ttft_s, elapsed, watch.estimated, watch.reasoning_estimated
+        )
+        return {
+            "http": status,
+            "raw": raw,
+            "timed_out": False,
+            "stopped": True,
+            "error": "stopped",
+            **metrics,
+            "elapsed_s": elapsed,
+        }
     if thread.is_alive():
         timed_out = True
+        error_text = error_text or "Timeout: wall clock exceeded"
+        notify({"state": "error", "error": error_text, "timed_out": True, "elapsed_s": elapsed})
     if error is not None and not timed_out and not isinstance(error, httpx.TimeoutException):
         raise error
+    metrics = call_metrics(
+        watch.usage, watch.ttft_s, elapsed, watch.estimated, watch.reasoning_estimated
+    )
     if status is None:
-        return {"http": 408, "raw": raw, "elapsed_s": elapsed, "timed_out": True}
-    return {"http": status, "raw": raw, "elapsed_s": elapsed, "timed_out": timed_out}
+        return {
+            "http": 408,
+            "raw": raw,
+            "timed_out": True,
+            "error": error_text or "Timeout: no response",
+            **metrics,
+            "elapsed_s": elapsed,
+        }
+    return {
+        "http": status,
+        "raw": raw,
+        "timed_out": timed_out,
+        "error": error_text,
+        **metrics,
+        "elapsed_s": elapsed,
+    }
 
 
 def _scrub(value: Any, secret: str) -> Any:
@@ -457,6 +825,8 @@ def run_middle_drop(
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
     stdout: TextIO | None = None,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+    cancel: threading.Event | None = None,
 ) -> list[dict[str, Any]]:
     out_stream = stdout if stdout is not None else sys.stdout
     secret = options.api_key
@@ -494,11 +864,27 @@ def run_middle_drop(
                 body = request_body(model, prompt, effort, options.max_tokens)
                 digest = hashlib.sha256(body).hexdigest()
                 for index in range(1, options.iterations + 1):
+                    if cancel is not None and cancel.is_set():
+                        break
                     delay = wait_seconds(last_start, monotonic(), options.min_interval)
                     if delay > 0:
                         sleep(delay)
+                        if cancel is not None and cancel.is_set():
+                            break
                     last_start = monotonic()
                     transport_error: str | None = None
+
+                    def forward(
+                        event: dict[str, Any],
+                        index: int = index,
+                        model: str = model,
+                        effort: str = effort,
+                    ) -> None:
+                        if on_event is not None:
+                            on_event(
+                                {"index": index, "model": model, "effort": effort, **event}
+                            )
+
                     try:
                         result = stream_chat(
                             options.base_url,
@@ -506,15 +892,24 @@ def run_middle_drop(
                             body,
                             options.timeout,
                             client,
+                            on_event=forward,
+                            cancel=cancel,
                         )
                     except httpx.HTTPError as exc:
+                        if cancel is not None and cancel.is_set():
+                            break
                         transport_error = _error_text(exc, secret)
                         result = {
                             "http": None,
                             "raw": b"",
                             "elapsed_s": monotonic() - last_start,
                             "timed_out": False,
+                            "error": transport_error,
+                            "ttft_s": None,
+                            "tok_s": None,
                         }
+                    if result.get("stopped") or (cancel is not None and cancel.is_set()):
+                        break
                     http_status = result["http"]
                     raw = result["raw"]
                     if http_status != 200:
@@ -553,6 +948,8 @@ def run_middle_drop(
                         "reasoning_effort": effort,
                         "http": http_status,
                         "elapsed_s": result["elapsed_s"],
+                        "ttft_s": result.get("ttft_s"),
+                        "tok_s": result.get("tok_s"),
                         "timed_out": bool(result["timed_out"]),
                         "request_bytes": len(body),
                         "request_sha256": digest,
